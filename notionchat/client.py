@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,12 @@ from notionchat.transcript import (
 )
 
 log = logging.getLogger(__name__)
+
+
+async def _safe_close_response(resp) -> None:
+    """Close a streaming response and its underlying session."""
+    with suppress(Exception):
+        await resp.aclose()
 
 
 def _empty_response_message(result, thread_id: str) -> str:
@@ -208,13 +215,16 @@ class NotionAIClient:
         on_delta: Callable[[str], None] | None = None,
     ) -> None:
         last_len = 0
-        async for line in resp.aiter_lines():
-            if isinstance(line, bytes):
-                line = line.decode("utf-8", errors="replace")
-            parser.feed_line(line)
-            if on_delta and len(parser.text) > last_len:
-                on_delta(parser.text[last_len:])
-                last_len = len(parser.text)
+        try:
+            async for line in resp.aiter_lines():
+                if isinstance(line, bytes):
+                    line = line.decode("utf-8", errors="replace")
+                parser.feed_line(line)
+                if on_delta and len(parser.text) > last_len:
+                    on_delta(parser.text[last_len:])
+                    last_len = len(parser.text)
+        finally:
+            await _safe_close_response(resp)
 
     async def _run_inference(
         self,
@@ -323,6 +333,7 @@ class NotionAIClient:
 
         async def producer() -> None:
             nonlocal last_emitted_clean
+            resp = None
             try:
                 resp = await client.post_stream(url, json=body, headers=headers)
                 if resp.status_code != 200:
@@ -344,6 +355,8 @@ class NotionAIClient:
             except BaseException as e:
                 http_error.append(e)
             finally:
+                if resp is not None:
+                    await _safe_close_response(resp)
                 await queue.put(None)
 
         async def consumer() -> AsyncIterator[str]:

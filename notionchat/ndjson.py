@@ -30,6 +30,61 @@ _SEARCH_PREAMBLE_MARKERS = (
     "checking the latest",
 )
 
+_NOTION_PAGE_PREAMBLE_MARKERS = (
+    "i'll create this as a notion page",
+    "i will create this as a notion page",
+    "i'll create a notion page",
+    "i will create a notion page",
+    "create this as a notion page",
+    "create a notion page",
+    "i'll write this as a notion page",
+    "i will write this as a notion page",
+    "let me create a notion page",
+    "let me write this as a notion page",
+    "i'll draft a notion page",
+    "i will draft a notion page",
+    "as a notion page so you have",
+    "as a notion page for you",
+    "clean, formatted long-form article",
+    "i'll create this as a page",
+    "i will create this as a page",
+    "let me write it as a page",
+    "i'll render this as a notion page",
+    "i will render this as a notion page",
+    "i'll save this as a notion page",
+    "i will save this as a notion page",
+    "notion page so you have a clean",
+)
+
+_META_REASONING_MARKERS = (
+    "prompt injection attempt",
+    "prompt-prompt injection",
+    "i'm noticing this is a prompt",
+    "i am noticing this is a prompt",
+    "m noticing this is a prompt",
+    "noticing this is a prompt",
+    "trying to override my instructions",
+    "override my instructions",
+    "elaborate preamble is suspicious",
+    "core request itself is legitimate",
+    "actual task is straightforward",
+    "the actual task is straightforward",
+    "i should write the article",
+    "ready to start writing",
+    "ready to write",
+    "i've got the key details",
+    "ive got the key details",
+    "looking past that framing",
+    "but looking past that framing",
+    "they're actually asking me",
+    "they are actually asking me",
+    "i'm ready to start writing",
+    "i am ready to start writing",
+    "i should respond",
+    "i will respond",
+    "i can answer",
+)
+
 _HEADING_START_RE = re.compile(r"#{1,6}\s+\S")
 
 @dataclass(slots=True)
@@ -51,8 +106,73 @@ def _looks_like_search_preamble(fragment: str) -> bool:
     return any(marker in lower for marker in _SEARCH_PREAMBLE_MARKERS)
 
 
+def _looks_like_notion_page_preamble(fragment: str) -> bool:
+    lower = fragment.strip().lower()
+    if not lower or len(lower) > 600:
+        return False
+    return any(marker in lower for marker in _NOTION_PAGE_PREAMBLE_MARKERS)
+
+
+def _starts_with_meta_reasoning(text: str) -> bool:
+    """Return True if the beginning of the text reads like leaked model reasoning."""
+    lower = text.strip().lower()
+    if not lower:
+        return False
+    head = lower[:300]
+    return any(marker in head for marker in _META_REASONING_MARKERS)
+
+
+def _strip_meta_reasoning(text: str) -> str:
+    """Strip Notion AI's internal reasoning that leaks as text before the real answer.
+
+    The leaked reasoning is a contiguous block at the start of the output. The
+    real answer usually starts at the first sentence boundary after the last
+    reasoning marker (e.g. "...now." followed by the article text).
+    """
+    stripped = text.strip()
+    if not stripped:
+        return text
+    if not _starts_with_meta_reasoning(stripped):
+        return text
+
+    # Prefer cutting at the first heading — the real article usually begins there.
+    heading = _HEADING_START_RE.search(stripped)
+    if heading and heading.start() > 0:
+        candidate = stripped[heading.start() :].lstrip()
+        if candidate:
+            return candidate
+
+    # Find the last occurrence of any meta-reasoning marker; the real content
+    # typically starts right after that marker ends.
+    lower = stripped.lower()
+    last_marker_end = -1
+    for marker in _META_REASONING_MARKERS:
+        idx = lower.rfind(marker)
+        if idx >= 0:
+            last_marker_end = max(last_marker_end, idx + len(marker))
+
+    if last_marker_end < 0:
+        return ""
+
+    # Find the first sentence boundary after the last marker. The boundary is a
+    # period followed by whitespace and a capital letter, or a period directly
+    # followed by an uppercase letter (the "now.Cursor" leak pattern).
+    tail = stripped[last_marker_end:]
+    match = re.search(r"\.(?:\s+(?=[A-Z])|(?=[A-Z]))", tail)
+    if match:
+        start = last_marker_end + match.end()
+        candidate = stripped[start:].strip()
+        if candidate:
+            return candidate
+
+    # Fallback: if there's no period-boundary, just drop everything up to the
+    # end of the last marker.
+    return stripped[last_marker_end:].strip()
+
+
+
 def clean_notion_output_text(text: str) -> str:
-    """Remove Notion web-search lead-ins that leak into assistant text."""
+    """Remove Notion web-search, Notion-page, and meta-reasoning lead-ins that leak into assistant text."""
     if not text:
         return text
 
@@ -60,21 +180,36 @@ def clean_notion_output_text(text: str) -> str:
     if not stripped:
         return text
 
+    # If the model is leaking internal reasoning as text, suppress everything
+    # until we can find the real start of the answer. While streaming, this
+    # holds back output until the reasoning block ends.
+    if _starts_with_meta_reasoning(stripped):
+        cleaned_reasoning = _strip_meta_reasoning(stripped)
+        if cleaned_reasoning:
+            stripped = cleaned_reasoning
+        else:
+            return ""
+
     heading = _HEADING_START_RE.search(stripped)
     if heading and heading.start() > 0:
         before = stripped[: heading.start()].strip().rstrip(".")
-        if _looks_like_search_preamble(before):
+        if _looks_like_search_preamble(before) or _looks_like_notion_page_preamble(before):
             return stripped[heading.start() :].lstrip()
 
     if "\n" in stripped:
         first_line, rest = stripped.split("\n", 1)
-        if _looks_like_search_preamble(first_line) and rest.strip():
+        if (
+            (_looks_like_search_preamble(first_line) or _looks_like_notion_page_preamble(first_line))
+            and rest.strip()
+        ):
             return rest.strip()
 
-    if _looks_like_search_preamble(stripped) and not _HEADING_START_RE.search(stripped):
+    if (
+        _looks_like_search_preamble(stripped) or _looks_like_notion_page_preamble(stripped)
+    ) and not _HEADING_START_RE.search(stripped):
         return ""
 
-    return text
+    return stripped
 
 def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)

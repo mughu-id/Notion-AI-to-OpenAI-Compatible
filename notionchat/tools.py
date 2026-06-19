@@ -1187,7 +1187,12 @@ def prepare_chat_input(
     tools_active = bool(normalized_tools) and tool_choice != "none"
     ide_agent = tools_active and (is_ide_agent_tools(normalized_tools) or cursor_ide)
 
-    system_parts: list[str] = []
+    system_parts: list[str] = [
+        "You are an OpenAI-compatible chat assistant. Respond directly as plain text or markdown. "
+        "Do NOT create, draft, or render Notion pages. Do NOT mention creating a Notion page. "
+        "Do NOT use Notion agent tools (updatePage, createPage, software factory, etc). "
+        "Answer inline in the conversation."
+    ]
     transcript_blocks: list[str] = []
     pending_tool_results: list[str] = []
 
