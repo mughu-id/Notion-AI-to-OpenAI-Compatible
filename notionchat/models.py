@@ -19,6 +19,7 @@ DEFAULT_MODEL_MAP: dict[str, str] = {
     "gpt-5.6-sol": "orange-mousse",
     "gpt-5.6-luna": "olive-jellyroll",
     "grok-4.5": "strawberry-whoopiepie",
+    "spacexai-4.5": "strawberry-whoopiepie",
     "grok-4.3": "xigua-mochi-medium",
     "opus-4.8": "ambrosia-tart-high",
     "opus-4.7": "apricot-sorbet-high",
@@ -80,10 +81,14 @@ def parse_available_models(response: dict[str, Any]) -> dict[str, str]:
             "gpt-4o",
             "grok-4.5",
             "grok-4.3",
+            "spacexai-4.5",
             "minimax-m2.5",
         ):
             if short in primary:
                 aliases.add(short)
+        # Notion renamed Grok 4.5 display name to SpaceXAI 4.5 (same internal id).
+        if "spacexai" in primary or "grok-4.5" in primary:
+            aliases.update({"grok-4.5", "spacexai-4.5", "SpaceXAI 4.5", "Grok 4.5"})
         for alias in aliases:
             out[alias] = mid
     return out

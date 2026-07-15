@@ -82,10 +82,14 @@ class NotionStreamResponse:
         self._closed = True
         with suppress(Exception):
             self._resp.close()
-        # Let curl_cffi's cleanup callbacks drain before closing the session.
-        await asyncio.sleep(0)
+        # Drain curl_cffi cleanup callbacks before closing the session.
+        # Without this, Python logs "Task was destroyed but it is pending!".
+        for _ in range(3):
+            await asyncio.sleep(0)
         with suppress(Exception):
             await self._session.close()
+        for _ in range(2):
+            await asyncio.sleep(0)
 
     def close(self) -> None:
         if self._closed:

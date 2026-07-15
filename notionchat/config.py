@@ -16,9 +16,25 @@ from notionchat.bootstrap import bootstrap_from_cookie_sync
 from notionchat.browser_fp import DEFAULT_CLIENT_VERSION, DEFAULT_USER_AGENT
 from notionchat.exceptions import NotionChatError
 
-load_dotenv()
-
 DEFAULT_BASE_URL = "https://app.notion.com/api/v3"
+
+
+def _resolve_home() -> Path | None:
+    """Project home for .env / account files when running `notion serve` from anywhere."""
+    raw = os.getenv("NOTIONCHAT_HOME", "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return None
+
+
+def _load_dotenv_files() -> None:
+    home = _resolve_home()
+    if home is not None:
+        load_dotenv(home / ".env", override=False)
+    load_dotenv(override=False)
+
+
+_load_dotenv_files()
 
 
 @dataclass(slots=True)
@@ -33,10 +49,16 @@ class Settings:
 
 
 def _env_path(name: str, default: str) -> Path:
-    return Path(os.getenv(name, default)).expanduser()
+    p = Path(os.getenv(name, default)).expanduser()
+    if not p.is_absolute():
+        home = _resolve_home()
+        if home is not None:
+            return (home / p).resolve()
+    return p
 
 
 def load_settings() -> Settings:
+    _load_dotenv_files()
     return Settings(
         api_key=os.getenv("NOTIONCHAT_API_KEY", "sk-notionchat"),
         host=os.getenv("NOTIONCHAT_HOST", "127.0.0.1"),

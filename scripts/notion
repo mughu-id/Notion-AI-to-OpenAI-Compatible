@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Launcher for PATH: add this scripts/ folder to your PATH, then run:
+#   notion serve
+#   notion setup
+#   notion init --cookie "..."
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+if [[ -x "$ROOT/.venv/bin/python" ]]; then
+  exec "$ROOT/.venv/bin/python" -m notionchat "$@"
+elif command -v python3 >/dev/null 2>&1; then
+  exec python3 -m notionchat "$@"
+elif command -v python >/dev/null 2>&1; then
+  exec python -m notionchat "$@"
+fi
+
+echo "Error: Python not found. Activate .venv or install Python 3.11+." >&2
+exit 1

@@ -1,0 +1,3 @@
+[console_scripts]
+notion = notionchat.__main__:main
+notionchat = notionchat.__main__:main

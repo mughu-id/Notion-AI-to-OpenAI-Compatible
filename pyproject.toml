@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "notionchat"
+version = "0.3.0"
+description = "OpenAI-compatible API proxy for Notion AI (cookie auth)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "mughu-id" }]
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "curl_cffi>=0.7",
+    "python-dotenv>=1.0",
+]
+
+[project.scripts]
+notion = "notionchat.__main__:main"
+notionchat = "notionchat.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["notionchat*"]

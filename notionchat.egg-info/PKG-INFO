@@ -1,3 +1,18 @@
+Metadata-Version: 2.4
+Name: notionchat
+Version: 0.3.0
+Summary: OpenAI-compatible API proxy for Notion AI (cookie auth)
+Author: mughu-id
+License: MIT
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: fastapi>=0.110
+Requires-Dist: uvicorn[standard]>=0.27
+Requires-Dist: curl_cffi>=0.7
+Requires-Dist: python-dotenv>=1.0
+Dynamic: license-file
+
 # Notion AI to OpenAI Compatible
 
 OpenAI-compatible HTTP API that routes chat requests to **Notion AI** (`runInferenceTranscript`) using your Notion browser session.

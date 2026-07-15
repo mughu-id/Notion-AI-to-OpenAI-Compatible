@@ -151,11 +151,105 @@ def _degarbble_hash_spam(text: str) -> str:
     return "\n".join(lines)
 
 
+_FENCE_LANG_COMMON = frozenset(
+    {
+        "sh",
+        "bash",
+        "zsh",
+        "fish",
+        "shell",
+        "txt",
+        "text",
+        "plain",
+        "plaintext",
+        "js",
+        "jsx",
+        "ts",
+        "tsx",
+        "javascript",
+        "typescript",
+        "py",
+        "python",
+        "rb",
+        "ruby",
+        "go",
+        "rs",
+        "rust",
+        "c",
+        "cpp",
+        "csharp",
+        "cs",
+        "java",
+        "kt",
+        "kotlin",
+        "swift",
+        "php",
+        "sql",
+        "html",
+        "css",
+        "scss",
+        "json",
+        "yaml",
+        "yml",
+        "toml",
+        "xml",
+        "md",
+        "markdown",
+        "diff",
+        "dockerfile",
+        "docker",
+        "powershell",
+        "ps1",
+        "console",
+        "output",
+        "ini",
+        "env",
+        "graphql",
+        "r",
+        "lua",
+        "perl",
+        "scala",
+        "dart",
+        "vue",
+        "svelte",
+        "zig",
+        "nim",
+        "elixir",
+        "ex",
+        "haskell",
+        "hs",
+        "clojure",
+        "makefile",
+        "cmake",
+    }
+)
+_FENCE_LANG_FRAG_RE = re.compile(r"^[a-zA-Z0-9_+-]+$")
+_OPEN_FENCE_LANG_RE = re.compile(r"`{3}([a-zA-Z0-9_+-]*)$")
+
+
+def _is_fence_lang_prefix(candidate: str) -> bool:
+    c = candidate.lower()
+    if not c:
+        return True
+    return any(lang.startswith(c) for lang in _FENCE_LANG_COMMON)
+
+
+def _is_extensible_fence_lang(lang: str) -> bool:
+    """True if lang can still grow into a longer known language (py→python, js→json)."""
+    l = lang.lower()
+    if not l:
+        return True
+    return any(known.startswith(l) and known != l for known in _FENCE_LANG_COMMON)
+
+
 def _join_text_blocks(parts: list[str]) -> str:
     """Join Notion text blocks without smashing markdown (esp. code fences).
 
     Notion streams multiple text blocks; concatenating with '' drops the newline
     between a closing fence and the next line, so code leaks into prose.
+
+    It also often emits fence language ids one character per block
+    (``` + "j" + "s" + "o" + "n" → ```json, not ```js + leaked "on").
     """
     cleaned = [p for p in parts if p]
     if not cleaned:
@@ -164,10 +258,96 @@ def _join_text_blocks(parts: list[str]) -> str:
     for part in cleaned[1:]:
         if out.endswith("\n") or part.startswith("\n"):
             out += part
-        else:
+            continue
+
+        fence = _OPEN_FENCE_LANG_RE.search(out)
+        if fence is not None:
+            lang = fence.group(1)
+            if (
+                _FENCE_LANG_FRAG_RE.fullmatch(part)
+                and len(lang) + len(part) <= 20
+            ):
+                candidate = lang + part
+                # Single-char fragments: keep gluing while the id can still grow
+                # into a longer known language (py→python, js→json).
+                if len(part) == 1:
+                    if lang.lower() not in _FENCE_LANG_COMMON or _is_extensible_fence_lang(lang):
+                        out += part
+                        continue
+                    out += "\n" + part
+                    continue
+                # Whole-token language (``` + "python") or still building a prefix
+                if (
+                    not lang
+                    or candidate.lower() in _FENCE_LANG_COMMON
+                    or _is_fence_lang_prefix(candidate)
+                ):
+                    if (
+                        lang.lower() in _FENCE_LANG_COMMON
+                        and candidate.lower() not in _FENCE_LANG_COMMON
+                        and not _is_extensible_fence_lang(lang)
+                    ):
+                        out += "\n" + part
+                    else:
+                        out += part
+                    continue
             out += "\n" + part
+            continue
+
+        out += "\n" + part
     return out
 
+
+_SPLIT_FENCE_LANG_RE = re.compile(
+    r"```([a-zA-Z0-9_+-]*)\n((?:[a-zA-Z0-9_+-]\n){1,16})",
+)
+_FENCE_LANG_TAIL_RE = re.compile(
+    r"```([a-zA-Z0-9_+-]+)\n([a-zA-Z0-9_+-]{1,12})\n",
+)
+
+
+def _longest_fence_lang(candidate: str) -> str | None:
+    lower = candidate.lower()
+    best: str | None = None
+    for lang in _FENCE_LANG_COMMON:
+        if lower == lang and (best is None or len(lang) > len(best)):
+            best = lang
+    return best
+
+
+def _repair_split_fence_languages(text: str) -> str:
+    """Repair ```\\ns\\nh\\ncode → ```sh\\ncode and ```js\\non\\n → ```json\\n."""
+
+    def _repl_chars(match: re.Match[str]) -> str:
+        lang = match.group(1)
+        glued = match.group(2).replace("\n", "")
+        combined = lang + glued
+        if not combined or len(combined) > 20:
+            return match.group(0)
+        # Prefer the longest exact known language for the combined id
+        best = _longest_fence_lang(combined)
+        if best:
+            return f"```{best}\n"
+        # lang already exact + leftover chars were code (e.g. ```sh + a,w,s)
+        if lang.lower() in _FENCE_LANG_COMMON:
+            return match.group(0)
+        if len(glued) >= 2:
+            return f"```{combined}\n"
+        return match.group(0)
+
+    text = _SPLIT_FENCE_LANG_RE.sub(_repl_chars, text)
+
+    def _repl_tail(match: re.Match[str]) -> str:
+        lang = match.group(1)
+        tail = match.group(2)
+        combined = lang + tail
+        best = _longest_fence_lang(combined)
+        # Only merge when it completes a longer known language (py+thon, js+on)
+        if best and len(best) > len(lang) and best.startswith(lang.lower()):
+            return f"```{best}\n"
+        return match.group(0)
+
+    return _FENCE_LANG_TAIL_RE.sub(_repl_tail, text)
 
 @dataclass(slots=True)
 class NDJSONParseResult:
@@ -304,6 +484,7 @@ def clean_notion_output_text(text: str, *, finalize: bool = True) -> str:
         return ""
 
     stripped = _degarbble_hash_spam(stripped)
+    stripped = _repair_split_fence_languages(stripped)
 
     if finalize:
         return _repair_missing_whitespace(stripped)
@@ -408,7 +589,8 @@ class NDJSONStreamParser:
             msg = event.get("message") or event.get("data") or "unknown notion error"
             raise NotionChatError(f"Notion error: {msg}", status_code=502)
         if event_type == "premium-feature-unavailable":
-            raise NotionChatError("Notion premium feature unavailable", status_code=402)
+            self._raise_premium_unavailable(event if isinstance(event, dict) else {})
+            return
 
         if event_type == "patch":
             self._handle_patch(event)
@@ -498,9 +680,16 @@ class NDJSONStreamParser:
         total = limit.get("total")
         upsell = avail.get("upsell") or {}
         product = upsell.get("product", "a paid plan")
+        detail = entry.get("message") or entry.get("error") or ""
+        quota = ""
+        if current is not None and total is not None:
+            quota = f" ({current}/{total} used)"
+        extra = f" {detail}" if detail else ""
         raise NotionChatError(
-            f"Notion AI credits exhausted ({current}/{total} used). "
-            f"Upgrade to Notion {product} or wait for your quota to reset.",
+            f"Notion AI credits exhausted{quota}.{extra} "
+            f"This comes from Notion's servers (not NotionChat). "
+            f"Upgrade to Notion {product}, wait for quota reset, "
+            f"or switch to a cheaper/enabled model / another workspace cookie.",
             status_code=402,
         )
 

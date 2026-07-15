@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -14,6 +15,9 @@ from notionchat.setup_cli import run_interactive_setup
 
 
 def cmd_serve(_: argparse.Namespace) -> int:
+    home = os.getenv("NOTIONCHAT_HOME", "").strip()
+    if home:
+        os.chdir(Path(home).expanduser().resolve())
     settings = load_settings()
     app = create_app(settings)
     uvicorn.run(app, host=settings.host, port=settings.port, log_level="info")
@@ -63,14 +67,24 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="notionchat", description="Notion AI OpenAI-compatible API")
+def _prog_name() -> str:
+    base = Path(sys.argv[0]).name.lower()
+    if base in ("notion", "notion.exe", "notion.cmd", "notion.bat"):
+        return "notion"
+    if base.startswith("notionchat"):
+        return "notionchat"
+    return "notion"
+
+
+def main(argv: list[str] | None = None) -> None:
+    prog = _prog_name()
+    parser = argparse.ArgumentParser(prog=prog, description="Notion AI OpenAI-compatible API")
     sub = parser.add_subparsers(dest="command")
 
     serve_p = sub.add_parser("serve", help="Start OpenAI-compatible API server")
     serve_p.set_defaults(func=cmd_serve)
 
-    setup_p = sub.add_parser("setup", help="Interactive wizard: cookie → account file → .env")
+    setup_p = sub.add_parser("setup", help="Interactive wizard: cookie -> account file -> .env")
     setup_p.add_argument("--env", default=".env", help="Path to write environment file (default: .env)")
     setup_p.add_argument("--account", default="notion_account.json", help="Output account file path")
     setup_p.add_argument("--cookie", default=None, help="Skip cookie prompt and use this value")
@@ -107,14 +121,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()
-        _hint = (
-            "\nNew here? Run the interactive setup wizard:\n"
-            "  python -m notionchat setup\n"
+        print(
+            f"\nNew here? Run the interactive setup wizard:\n"
+            f"  {prog} setup\n"
+            f"Or start the API server:\n"
+            f"  {prog} serve\n",
+            file=sys.stderr,
         )
-        print(_hint, file=sys.stderr)
-        return 1
-    return args.func(args)
+        raise SystemExit(1)
+    raise SystemExit(args.func(args))
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
