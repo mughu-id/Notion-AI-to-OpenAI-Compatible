@@ -4,6 +4,9 @@ OpenAI-compatible HTTP API that routes chat requests to **Notion AI** (`runInfer
 
 Use it with [Cursor](https://cursor.com), [9router](https://github.com), Postman, or any client that speaks the OpenAI Chat Completions API.
 
+[![PayPal](https://img.shields.io/badge/PayPal-Donate-blue?style=flat-square&logo=paypal)](https://paypal.me/captainredz?locale.x=en_US&country.x=ID)
+[![Traktir Kopi](https://img.shields.io/badge/%F0%9F%8D%B5%20Traktir%20Kopi-MuGhu-orange?style=flat-square)](https://traktir.mughu.id/)
+
 > **Educational Purpose Only** — This project is intended for learning and research purposes only. It is not affiliated with, endorsed by, or officially supported by Notion. Do not use it to violate Notion's Terms of Service or to access paid features without a valid subscription.
 
 > **Unofficial project.** Not affiliated with or endorsed by Notion. You are responsible for complying with Notion's terms of service and your workspace plan limits.
@@ -221,6 +224,22 @@ curl http://127.0.0.1:1994/v1/chat/completions \
 
 Import [`postman/NotionChat.postman_collection.json`](postman/NotionChat.postman_collection.json) for more examples.
 
+### Test Screenshots (Postman & Notion AI UI)
+
+Below are visual confirmations of the API completion and model alignment flows running locally:
+
+#### 1. Chat Completion Output (`gpt-5.6-terra`)
+![Postman completion request](https://img.lightshot.app/ElIeVwm5RGClRmS4tg3RAQ.png)
+
+#### 2. Chat Completion Output (`fable-5`)
+![Postman fable-5 request](https://img.lightshot.app/4J53VlBVQ3eU2gCXiTIwzw.png)
+
+#### 3. Notion UI Side-by-Side (`gpt-5.6-terra` thread view)
+![Notion UI session matching gpt-5.6-terra](https://img.lightshot.app/XfAmfEdGSUqh6sa5IxMNEQ.png)
+
+#### 4. Notion UI Side-by-Side (`fable-5` thread view)
+![Notion UI session matching fable-5](https://img.lightshot.app/YrkxNs9PTkeQn9tgcM1TXg.png)
+
 ### 7. Run in background with PM2 (optional)
 
 [PM2](https://pm2.keymetrics.io/) keeps NotionChat running, restarts on crash, and can start on boot.
@@ -413,5 +432,5 @@ This software is provided as-is. Using browser session cookies to access Notion'
 
 If you find this project useful, consider supporting its development:
 
-[![Traktir Kopi](https://img.shields.io/badge/%F0%9F%8D%B5%20Traktir%20Kopi-MuGhu-orange)](https://traktir.mughu.id/)
-[![PayPal](https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal)](https://paypal.me/captainredz?locale.x=en_US&country.x=ID)
+[![PayPal](https://img.shields.io/badge/PayPal-Donate-blue?style=flat-square&logo=paypal)](https://paypal.me/captainredz?locale.x=en_US&country.x=ID)
+[![Traktir Kopi](https://img.shields.io/badge/%F0%9F%8D%B5%20Traktir%20Kopi-MuGhu-orange?style=flat-square)](https://traktir.mughu.id/)
