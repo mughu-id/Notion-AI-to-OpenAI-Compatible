@@ -35,6 +35,7 @@ DEFAULT_MODEL_MAP: dict[str, str] = {
     "kimi-k2.7-code": "fireworks-kimi-k2.7",
     "deepseek-v4-pro": "baseten-deepseek-v4-pro",
     "minimax-m2.5": "fireworks-minimax-m2.5",
+    "fable-5": "acai-budino-high",
     "ambrosia-tart-high": "ambrosia-tart-high",
     "baseten-glm-5.2": "baseten-glm-5.2",
 }
@@ -96,6 +97,7 @@ def parse_available_models(response: dict[str, Any]) -> dict[str, str]:
             "kimi-k2.7-code",
             "deepseek-v4-pro",
             "minimax-m2.5",
+            "fable-5",
         ):
             if short in primary:
                 aliases.add(short)
@@ -283,6 +285,10 @@ def resolve_model(model: str | None, *, default: str, alias_map: dict[str, str] 
         hit = _lookup_model("deepseek-v4-pro", dynamic) or _lookup_model(
             "deepseek-v4-pro", DEFAULT_MODEL_MAP
         )
+        if hit:
+            return hit
+    if "fable" in lower:
+        hit = _lookup_model("fable-5", dynamic) or _lookup_model("fable-5", DEFAULT_MODEL_MAP)
         if hit:
             return hit
 
