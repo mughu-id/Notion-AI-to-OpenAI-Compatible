@@ -87,7 +87,21 @@ def _choose_workspace(
     default_first: bool = False,
 ) -> str:
     if preset:
-        return preset
+        needle = preset.strip().lower()
+        exact = [w for w in workspaces if w.space_name.lower() == needle]
+        if exact:
+            return exact[0].space_name
+        partial = [
+            w
+            for w in workspaces
+            if needle in w.space_name.lower() or w.space_name.lower() in needle
+        ]
+        if len(partial) == 1:
+            _print(f"Workspace {preset!r} not exact — using {partial[0].space_name!r}")
+            return partial[0].space_name
+        _print(f"Workspace {preset!r} not found — auto-selecting {workspaces[0].space_name!r}")
+        _print(f"  Available: {', '.join(w.space_name for w in workspaces)}")
+        return workspaces[0].space_name
     if len(workspaces) == 1 or default_first:
         return workspaces[0].space_name
 

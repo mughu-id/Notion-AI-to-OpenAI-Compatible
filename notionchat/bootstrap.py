@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -15,6 +16,8 @@ from notionchat.browser_fp import (
     fingerprint_kwargs,
 )
 from notionchat.exceptions import NotionChatError
+
+log = logging.getLogger(__name__)
 
 BASE_URL = "https://app.notion.com/api/v3"
 
@@ -126,6 +129,44 @@ def _extract_workspaces(record_map: dict[str, Any]) -> list[Workspace]:
     return spaces
 
 
+def _pick_workspace(workspaces: list[Workspace], space_name: str | None) -> Workspace:
+    """Resolve a workspace by name, otherwise auto-select the first available one."""
+    if not workspaces:
+        raise NotionChatError("No workspaces found for this account", status_code=502)
+
+    names = ", ".join(w.space_name for w in workspaces)
+    if space_name:
+        needle = space_name.strip().lower()
+        matches = [w for w in workspaces if w.space_name.lower() == needle]
+        if matches:
+            return matches[0]
+        # Partial / substring match (e.g. env has stale name from another account)
+        partial = [w for w in workspaces if needle in w.space_name.lower() or w.space_name.lower() in needle]
+        if len(partial) == 1:
+            log.warning(
+                "Workspace %r not exact; using closest match %r",
+                space_name,
+                partial[0].space_name,
+            )
+            return partial[0]
+        log.warning(
+            "Workspace %r not found (available: %s) — auto-selecting %r",
+            space_name,
+            names,
+            workspaces[0].space_name,
+        )
+        return workspaces[0]
+
+    if len(workspaces) > 1:
+        log.info(
+            "Multiple workspaces found (%s) — auto-selecting %r "
+            "(set NOTION_SPACE_NAME or run `notion setup` to choose)",
+            names,
+            workspaces[0].space_name,
+        )
+    return workspaces[0]
+
+
 def bootstrap_from_cookie_sync(
     cookie: str,
     *,
@@ -185,20 +226,7 @@ def _account_from_load_user_content(
     if not workspaces:
         raise NotionChatError("No workspaces found for this account", status_code=502)
 
-    chosen = workspaces[0]
-    if space_name:
-        matches = [w for w in workspaces if w.space_name.lower() == space_name.lower()]
-        if matches:
-            chosen = matches[0]
-        else:
-            names = ", ".join(w.space_name for w in workspaces)
-            raise NotionChatError(f"Workspace {space_name!r} not found. Available: {names}", status_code=400)
-    elif len(workspaces) > 1:
-        names = ", ".join(w.space_name for w in workspaces)
-        raise NotionChatError(
-            f"Multiple workspaces found. Run `python -m notionchat setup` or init with --space-name. Available: {names}",
-            status_code=400,
-        )
+    chosen = _pick_workspace(workspaces, space_name)
 
     extras: dict[str, Any] = {}
     if sec_ch_ua:
