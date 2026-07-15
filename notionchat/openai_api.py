@@ -569,7 +569,7 @@ async def lifespan(app: FastAPI):
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
-    app = FastAPI(title="NotionChat", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title="NotionChat", version="0.3.1", lifespan=lifespan)
     app.state.settings = settings
 
     def verify_key(authorization: str | None = Header(default=None)) -> None:

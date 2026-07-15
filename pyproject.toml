@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "notionchat"
-version = "0.3.0"
+version = "0.3.1"
 description = "OpenAI-compatible API proxy for Notion AI (cookie auth)"
 readme = "README.md"
 requires-python = ">=3.11"
