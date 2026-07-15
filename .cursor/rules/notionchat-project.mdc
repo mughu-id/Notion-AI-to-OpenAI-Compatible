@@ -11,6 +11,7 @@ This is a **public open-source** project (MIT). Unofficial OpenAI-compatible HTT
 
 - **Never commit** secrets: `.env`, `notion_account.json`, `threads/`, cookies, captures (`network.txt`, `business.txt`), zip archives with accounts.
 - Prefer generic docs (placeholders like `<your-clone>`, not machine-specific `G:\...` paths).
+- Background process option: `pm2 start ecosystem.config.cjs` (see README). Do not auto-run PM2 unless the user asks.
 - Do not expand scope into jailbreaks of Notion ToS beyond what the project already documents; keep educational/disclaimer tone.
 - Do not auto-run long-lived servers (`notion serve`, `npm start`, etc.) unless the user asks. Do not kill user ports.
 

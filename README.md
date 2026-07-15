@@ -221,9 +221,40 @@ curl http://127.0.0.1:1994/v1/chat/completions \
 
 Import [`postman/NotionChat.postman_collection.json`](postman/NotionChat.postman_collection.json) for more examples.
 
+### 7. Run in background with PM2 (optional)
+
+[PM2](https://pm2.keymetrics.io/) keeps NotionChat running, restarts on crash, and can start on boot.
+
+```bash
+# one-time: Node.js required for PM2
+npm install -g pm2
+
+# from the project root (venv + .env already set up)
+pm2 start ecosystem.config.cjs
+pm2 status
+pm2 logs notionchat
+```
+
+Useful commands:
+
+```bash
+pm2 restart notionchat
+pm2 stop notionchat
+pm2 delete notionchat
+pm2 save
+pm2 startup    # print OS instructions to relaunch PM2 after reboot
+```
+
+Notes:
+
+- `ecosystem.config.cjs` prefers `.venv` Python, sets `NOTIONCHAT_HOME` to the project root, and writes logs under `logs/`.
+- Bind host/port still come from `.env` (`NOTIONCHAT_HOST`, `NOTIONCHAT_PORT`).
+- Use **one** process (`instances: 1`) — NotionChat is not meant for multi-instance concurrency on the same cookie/thread state.
+- After changing `.env` or code: `pm2 restart notionchat`.
+
 ## Cursor / 9router setup
 
-1. Run NotionChat locally (`notion serve`).
+1. Run NotionChat locally (`notion serve` or `pm2 start ecosystem.config.cjs`).
 2. In your router or Cursor custom model settings:
    - **Base URL:** `http://127.0.0.1:1994/v1`
    - **API key:** value of `NOTIONCHAT_API_KEY` from `.env`
@@ -253,6 +284,7 @@ Returns models available to your Notion workspace, cached for 5 minutes.
 notionchat/          # Python package (API, client, parsers, tools bridge)
 scripts/             # PATH launchers: notion / notionchat (.cmd on Windows)
 postman/             # Postman collection
+ecosystem.config.cjs # PM2 process file (`pm2 start ecosystem.config.cjs`)
 .env.example         # Copy to .env (never commit .env)
 pyproject.toml       # package + CLI entry points (notion, notionchat)
 requirements.txt
@@ -272,6 +304,7 @@ requirements.txt
 - [x] **Windows Server browser fingerprinting** (`browser_fp`) to reduce `trust-rule-denied` when browser AI works but the API does not.
 - [x] **Auto-confirm web-search URL safety prompts** so long research generations don't stall waiting for a manual Allow click.
 - [x] **CLI commands** — `notion` / `notionchat` via `pip install -e .` or `scripts/` PATH launchers.
+- [x] **PM2 support** — `ecosystem.config.cjs` for background run, auto-restart, and logs.
 - [x] **Experimental Tools Compiler** for mapping Cursor Agent commands (`Shell`, `Write`) to Notion prose blocks and back.
 
 ### Next Steps (Todo)
@@ -279,11 +312,11 @@ requirements.txt
 - [ ] **Auto-refresh cookie session** by simulating background navigation.
 - [ ] **Multimodal support** (images/assets) mapped to Notion's inline image attachment blocks.
 - [ ] **Full Custom Agent configuration** via endpoint custom params or headers.
+- [ ] **Background service setup** — Windows Service / systemd unit (PM2 already covered; native service wrappers optional).
 - [ ] **Dockerization** — add a simple `Dockerfile` and `docker-compose.yml` to spin up the proxy server anywhere.
 - [ ] **Lightweight Dashboard (Web UI)** — add a `/admin` panel to monitor active threads, log history, and verify/refresh browser cookies in real-time.
 - [ ] **Multiple API keys management** instead of a single global `NOTIONCHAT_API_KEY`.
 - [ ] **Workspace Search mapping** — map file-search queries to Notion Workspace search to let Notion AI reference other docs in your workspace.
-- [ ] **Background service setup** — add convenience scripts to register NotionChat as a background daemon (Windows Service / systemd unit).
 
 ## Known limitations
 

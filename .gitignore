@@ -12,6 +12,7 @@ notion_account.json
 *.egg-info/
 dist/
 build/
+logs/
 
 # Private capture files (cookies, internal Notion payloads)
 network.txt
