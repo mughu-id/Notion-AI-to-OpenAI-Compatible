@@ -700,10 +700,12 @@ class NDJSONStreamParser:
             self._raise_premium_unavailable(entry)
         if sub_type == "trust-rule-denied":
             raise NotionChatError(
-                f"{message} Re-run init on this machine with the full browser cookie from "
-                "app.notion.com (DevTools → Application → Cookies). Ensure notion-client-version "
-                "and User-Agent match your browser — set NOTION_USER_AGENT / NOTION_CLIENT_VERSION "
-                "in .env if needed.",
+                f"{message} (Notion trust-rule-denied — same as the web UI "
+                "'This action is not currently available'). Often intermittent under "
+                "bursty load; NotionChat will retry automatically. If it keeps failing: "
+                "refresh token_v2 from app.notion.com on this host, and match "
+                "notion-client-version / User-Agent (NOTION_USER_AGENT / "
+                "NOTION_CLIENT_VERSION).",
                 status_code=403,
             )
         raise NotionChatError(

@@ -710,6 +710,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             finally:
                 await client.aclose()
         except NotionChatError as e:
+            if e.status_code == 403:
+                log.warning("chat/completions 403: %s", e)
             raise HTTPException(status_code=e.status_code, detail=str(e)) from e
 
     return app
