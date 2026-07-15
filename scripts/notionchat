@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Alias so `notionchat serve` works the same as `notion serve` via PATH.
+exec "$(cd "$(dirname "$0")" && pwd)/notion" "$@"

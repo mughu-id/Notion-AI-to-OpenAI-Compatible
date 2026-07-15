@@ -1,0 +1,49 @@
+---
+description: Core context for NotionChat — public open-source Notion AI → OpenAI proxy
+alwaysApply: true
+---
+
+# NotionChat — agent context
+
+This is a **public open-source** project (MIT). Unofficial OpenAI-compatible HTTP proxy for **Notion AI** using browser cookie auth (`token_v2`). Repo: keep it safe for public use.
+
+## Do / don't for public open source
+
+- **Never commit** secrets: `.env`, `notion_account.json`, `threads/`, cookies, captures (`network.txt`, `business.txt`), zip archives with accounts.
+- Prefer generic docs (placeholders like `<your-clone>`, not machine-specific `G:\...` paths).
+- Do not expand scope into jailbreaks of Notion ToS beyond what the project already documents; keep educational/disclaimer tone.
+- Do not auto-run long-lived servers (`notion serve`, `npm start`, etc.) unless the user asks. Do not kill user ports.
+
+## Architecture (short)
+
+```
+Client → NotionChat (FastAPI /v1/*) → Notion runInferenceTranscript (NDJSON)
+```
+
+Key modules under `notionchat/`:
+
+| File | Role |
+|------|------|
+| `openai_api.py` | OpenAI-compatible routes + Windows lifespan/hibernation handler |
+| `client.py` | Inference client, stream buffer, auto-confirm URL safety |
+| `transcript.py` | Notion transcript / config payload (disable page/agent affordances) |
+| `ndjson.py` | NDJSON parse, clean output, credits/trust errors |
+| `tools.py` | Experimental tool-call compiler (Notion has no native function calling) |
+| `models.py` | `getAvailableModels` → aliases; `/v1/models` uses exact `modelMessage` |
+| `browser_fp.py` | Browser fingerprint headers + TLS impersonate for trust rules |
+| `bootstrap.py` / `setup_cli.py` | Cookie init + interactive `setup` |
+| `notion_http.py` | `curl_cffi` Chrome impersonation sessions |
+
+CLI: `notion` / `notionchat` via `pyproject.toml` entry points and `scripts/notion(.cmd)`. Config home: `NOTIONCHAT_HOME`.
+
+## Hard constraints
+
+- Notion AI **does not** expose real OpenAI tool calling. Agent mode is heuristic — document limits; don't claim 100% Cursor Agent parity.
+- `402` from this API usually means **Notion AI credits exhausted** (`premium-feature-unavailable`), not a broken route.
+- Prefer minimal diffs; match existing style. No drive-by refactors or unsolicited markdown files.
+
+## When changing behavior
+
+- Preserve streaming correctness (buffer + `clean_notion_output_text`, per-block NDJSON paths, `patch-sync`).
+- Keep model list display names = Notion `modelMessage`; resolution must map friendly + internal IDs.
+- After CLI/PATH changes, update README with **portable** Windows + Unix setup steps.

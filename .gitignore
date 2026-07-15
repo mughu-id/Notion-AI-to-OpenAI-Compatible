@@ -9,6 +9,9 @@ threads/
 notion_account.json
 *.log
 *.zip
+*.egg-info/
+dist/
+build/
 
 # Private capture files (cookies, internal Notion payloads)
 network.txt

@@ -62,7 +62,7 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-This registers global commands: **`notion`** and **`notionchat`**.
+This registers CLI commands: **`notion`** and **`notionchat`** (same behavior).
 
 ### 2. Configure environment
 
@@ -80,7 +80,7 @@ Edit `.env`:
 | `NOTIONCHAT_ACCOUNT` | Path to account JSON (default `notion_account.json`) |
 | `NOTIONCHAT_THREADS_DIR` | Thread state directory (default `threads/`) |
 | `NOTIONCHAT_DEFAULT_MODEL` | Default Notion model ID |
-| `NOTIONCHAT_HOME` | Optional — absolute project folder (so `notion serve` finds `.env` from any cwd) |
+| `NOTIONCHAT_HOME` | Optional — absolute project folder so `notion serve` finds `.env` / account files from any cwd |
 | `NOTION_COOKIE` | Optional — full `document.cookie` for auto-bootstrap on startup |
 
 ### 3. Bootstrap account from browser cookie
@@ -91,6 +91,12 @@ Edit `.env`:
 
 ```bash
 notion init --cookie "notion_browser_id=...; token_v2=..."
+```
+
+Or use the interactive wizard:
+
+```bash
+notion setup
 ```
 
 If you have multiple workspaces:
@@ -109,37 +115,97 @@ Alternatively, set `NOTION_COOKIE` in `.env` and NotionChat will bootstrap on fi
 notion serve
 ```
 
-(Same as `notionchat serve` or `python -m notionchat serve`.)
+Same as `notionchat serve` or `python -m notionchat serve`.
 
-Server URL: `http://127.0.0.1:1994`
+Server URL: `http://127.0.0.1:1994` (or your `NOTIONCHAT_HOST` / `NOTIONCHAT_PORT`).
 
-#### Windows CMD — add `notion` to PATH
+### 5. Optional — add `notion` to PATH (use from any folder)
 
-**Option A — pip entry point (recommended)**  
-After `pip install -e .` (with venv activated), `notion.exe` is in `.venv\Scripts\`. Add that folder to your user PATH, or keep the venv activated.
+#### Windows (CMD / PowerShell)
 
-**Option B — project launcher**  
-Add the project's `scripts` folder to PATH:
+**Option A — pip entry point (recommended after `pip install -e .`)**
 
-```
-G:\PROJECT ISENG\Notion\NotionChat\scripts
-```
+1. Note where `notion.exe` was installed. With a venv:
 
-Also set user env var:
+   ```
+   <your-clone>\.venv\Scripts
+   ```
 
-```
-NOTIONCHAT_HOME=G:\PROJECT ISENG\Notion\NotionChat
-```
+   With user install (no venv):
 
-Then from any CMD:
+   ```
+   %APPDATA%\Python\Python3xx\Scripts
+   ```
 
-```bat
+2. Add that folder to your **user PATH**:
+   - Settings → System → About → Advanced system settings → Environment Variables
+   - Under **User variables** → `Path` → Edit → New → paste the Scripts folder
+3. Open a **new** CMD window and run:
+
+   ```bat
+   notion serve
+   ```
+
+Also set a user variable so config is found from any directory:
+
+| Name | Value |
+|------|--------|
+| `NOTIONCHAT_HOME` | Full path to your clone, e.g. `C:\Users\You\Notion-AI-to-OpenAI-Compatible` |
+
+**Option B — project `scripts\` launcher (no global pip Scripts needed)**
+
+1. Add this folder to your user PATH:
+
+   ```
+   <your-clone>\scripts
+   ```
+
+   Example: `C:\Users\You\Notion-AI-to-OpenAI-Compatible\scripts`
+
+2. Set user env:
+
+   | Name | Value |
+   |------|--------|
+   | `NOTIONCHAT_HOME` | Full path to `<your-clone>` |
+
+   (`notion.cmd` also defaults `NOTIONCHAT_HOME` to the parent of `scripts\` if unset.)
+
+3. New CMD:
+
+   ```bat
+   notion serve
+   notion setup
+   notionchat serve
+   ```
+
+#### macOS / Linux
+
+**Option A — pip / venv**
+
+```bash
+source .venv/bin/activate   # keeps notion on PATH while active
+# or add to ~/.bashrc / ~/.zshrc:
+# export PATH="$HOME/path/to/Notion-AI-to-OpenAI-Compatible/.venv/bin:$PATH"
+export NOTIONCHAT_HOME="$HOME/path/to/Notion-AI-to-OpenAI-Compatible"
 notion serve
-notion setup
-notion init --cookie "..."
 ```
 
-### 5. Test
+**Option B — `scripts/` launcher**
+
+```bash
+# ~/.bashrc or ~/.zshrc
+export PATH="$HOME/path/to/Notion-AI-to-OpenAI-Compatible/scripts:$PATH"
+export NOTIONCHAT_HOME="$HOME/path/to/Notion-AI-to-OpenAI-Compatible"
+chmod +x "$NOTIONCHAT_HOME/scripts/notion" "$NOTIONCHAT_HOME/scripts/notionchat"
+```
+
+Then:
+
+```bash
+notion serve
+```
+
+### 6. Test
 
 ```bash
 curl http://127.0.0.1:1994/healthz
@@ -184,17 +250,12 @@ Returns models available to your Notion workspace, cached for 5 minutes.
 ## Project layout
 
 ```
-notionchat/
-  openai_api.py    # FastAPI routes
-  client.py        # Notion inference client
-  tools.py         # OpenAI tools ↔ Notion bridge / compiler
-  transcript.py    # Notion transcript payloads
-  ndjson.py        # Stream parser
-  bootstrap.py     # Cookie → account bootstrap
-  models.py        # Model aliases and /v1/models
-postman/           # Postman collection
-.env.example
-config.example.json
+notionchat/          # Python package (API, client, parsers, tools bridge)
+scripts/             # PATH launchers: notion / notionchat (.cmd on Windows)
+postman/             # Postman collection
+.env.example         # Copy to .env (never commit .env)
+pyproject.toml       # package + CLI entry points (notion, notionchat)
+requirements.txt
 ```
 
 ## Project Status & Roadmap
@@ -210,6 +271,7 @@ config.example.json
 - [x] **Chrome TLS Impersonation** (via `curl_cffi`) and Windows event loop fixes for high stability.
 - [x] **Windows Server browser fingerprinting** (`browser_fp`) to reduce `trust-rule-denied` when browser AI works but the API does not.
 - [x] **Auto-confirm web-search URL safety prompts** so long research generations don't stall waiting for a manual Allow click.
+- [x] **CLI commands** — `notion` / `notionchat` via `pip install -e .` or `scripts/` PATH launchers.
 - [x] **Experimental Tools Compiler** for mapping Cursor Agent commands (`Shell`, `Write`) to Notion prose blocks and back.
 
 ### Next Steps (Todo)
@@ -284,7 +346,9 @@ Contributions welcome on [`notionchat/tools.py`](notionchat/tools.py) — especi
 | Problem | Things to try |
 |---------|----------------|
 | Empty assistant response | Refresh cookie; check `space_id` in account file; verify AI credits |
-| `401` / `403` from Notion | Re-run `python -m notionchat init --cookie "..."` |
+| `402 Payment Required` | Notion AI credits exhausted for this workspace — check Notion billing / quota or switch cookie |
+| `401` / `403` from Notion | Re-run `notion init --cookie "..."` (fresh full cookie from the same machine) |
+| `notion` not found in CMD | Add `.venv\Scripts` or `scripts\` to PATH; set `NOTIONCHAT_HOME` to the project folder |
 | Agent does nothing | New Agent chat; check server logs for `IDE bridge tool_calls=...` |
 | Wrong model | Call `GET /v1/models`; use an ID from that list |
 | Business / empty stream | Ensure `curl_cffi` is installed (Chrome TLS impersonation) |
