@@ -25,11 +25,18 @@ DEFAULT_MODEL_MAP: dict[str, str] = {
     "opus-4.7": "apricot-sorbet-high",
     "opus-4.6": "avocado-froyo-medium",
     "sonnet-4.6": "almond-croissant-low",
+    "sonnet-5": "angel-cake-high",
     "haiku-4.5": "anthropic-haiku-4.5",
     "gemini-2.5-flash": "vertex-gemini-2.5-flash",
     "gemini-3-flash": "gingerbread",
+    "gemini-3.5-flash": "vertex-gemini-3.5-flash",
+    "glm-5.2": "baseten-glm-5.2",
+    "kimi-k2.6": "fireworks-kimi-k2.6",
+    "kimi-k2.7-code": "fireworks-kimi-k2.7",
+    "deepseek-v4-pro": "baseten-deepseek-v4-pro",
     "minimax-m2.5": "fireworks-minimax-m2.5",
     "ambrosia-tart-high": "ambrosia-tart-high",
+    "baseten-glm-5.2": "baseten-glm-5.2",
 }
 
 ANTHROPIC_ALIASES: dict[str, str] = {
@@ -69,7 +76,9 @@ def parse_available_models(response: dict[str, Any]) -> dict[str, str]:
             "opus-4.7",
             "opus-4.6",
             "sonnet-4.6",
+            "sonnet-5",
             "haiku-4.5",
+            "gemini-3.5-flash",
             "gemini-3-flash",
             "gemini-2.5-flash",
             "gpt-5.6-terra",
@@ -82,6 +91,10 @@ def parse_available_models(response: dict[str, Any]) -> dict[str, str]:
             "grok-4.5",
             "grok-4.3",
             "spacexai-4.5",
+            "glm-5.2",
+            "kimi-k2.6",
+            "kimi-k2.7-code",
+            "deepseek-v4-pro",
             "minimax-m2.5",
         ):
             if short in primary:
@@ -89,6 +102,8 @@ def parse_available_models(response: dict[str, Any]) -> dict[str, str]:
         # Notion renamed Grok 4.5 display name to SpaceXAI 4.5 (same internal id).
         if "spacexai" in primary or "grok-4.5" in primary:
             aliases.update({"grok-4.5", "spacexai-4.5", "SpaceXAI 4.5", "Grok 4.5"})
+        if "glm" in primary:
+            aliases.update({"glm-5.2", "GLM 5.2"})
         for alias in aliases:
             out[alias] = mid
     return out
@@ -254,6 +269,26 @@ def resolve_model(model: str | None, *, default: str, alias_map: dict[str, str] 
                 hit = _lookup_model(key, dynamic) or _lookup_model(key, DEFAULT_MODEL_MAP)
                 if hit:
                     return hit
+    if "glm" in lower:
+        hit = _lookup_model("glm-5.2", dynamic) or _lookup_model("glm-5.2", DEFAULT_MODEL_MAP)
+        if hit:
+            return hit
+    if "kimi" in lower:
+        for key in ("kimi-k2.7-code", "kimi-k2.6"):
+            if key.replace("kimi-", "") in lower or key in lower:
+                hit = _lookup_model(key, dynamic) or _lookup_model(key, DEFAULT_MODEL_MAP)
+                if hit:
+                    return hit
+    if "deepseek" in lower:
+        hit = _lookup_model("deepseek-v4-pro", dynamic) or _lookup_model(
+            "deepseek-v4-pro", DEFAULT_MODEL_MAP
+        )
+        if hit:
+            return hit
 
-    log.warning("Unknown model %r — passing through to Notion", model)
+    # Already a Notion internal id (vendor-codename style).
+    if model in dynamic.values() or model in DEFAULT_MODEL_MAP.values():
+        return model
+
+    log.debug("Unknown model %r — passing through to Notion", model)
     return model

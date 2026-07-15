@@ -633,21 +633,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             if not tools and is_ide_agent_messages(req.messages):
                 log.warning("Cursor-like request but tools[] empty after prepare_chat_input")
-            log.info(
-                "chat stream=%s model=%s resolved=%s tools=%d tools_active=%s ide_agent=%s tool_names=%s msgs=%d",
-                req.stream,
-                normalize_request_model(req.model) or req.model,
-                _resolved_request_model(req, settings),
-                len(tools),
-                tools_active,
-                ide_agent,
-                sorted(client_tool_names(tools))[:8],
-                len(req.messages),
-            )
-            thread_id = None if (ide_agent or tools_active) else _resolve_thread_id(req, settings)
             client = get_client()
             try:
+                # Prefetch aliases before resolve/log so names like glm-5.2 map cleanly.
                 await _ensure_model_aliases(client, settings)
+                log.info(
+                    "chat stream=%s model=%s resolved=%s tools=%d tools_active=%s ide_agent=%s tool_names=%s msgs=%d",
+                    req.stream,
+                    normalize_request_model(req.model) or req.model,
+                    _resolved_request_model(req, settings),
+                    len(tools),
+                    tools_active,
+                    ide_agent,
+                    sorted(client_tool_names(tools))[:8],
+                    len(req.messages),
+                )
+                thread_id = None if (ide_agent or tools_active) else _resolve_thread_id(req, settings)
                 if req.stream:
                     return StreamingResponse(
                         _stream_openai(
