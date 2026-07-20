@@ -46,6 +46,8 @@ class Settings:
     thread_state_dir: Path
     base_url: str
     default_model: str
+    # Reuse one Notion thread for N completions before rotating (0 = off).
+    thread_reuse_limit: int
 
 
 def _env_path(name: str, default: str) -> Path:
@@ -55,6 +57,16 @@ def _env_path(name: str, default: str) -> Path:
         if home is not None:
             return (home / p).resolve()
     return p
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 def load_settings() -> Settings:
@@ -67,6 +79,7 @@ def load_settings() -> Settings:
         thread_state_dir=_env_path("NOTIONCHAT_THREADS_DIR", "threads"),
         base_url=os.getenv("NOTIONCHAT_NOTION_BASE_URL", DEFAULT_BASE_URL).rstrip("/"),
         default_model=os.getenv("NOTIONCHAT_DEFAULT_MODEL", "ambrosia-tart-high"),
+        thread_reuse_limit=max(0, _env_int("NOTIONCHAT_THREAD_REUSE_LIMIT", 0)),
     )
 
 

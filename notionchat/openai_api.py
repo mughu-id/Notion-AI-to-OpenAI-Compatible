@@ -41,6 +41,10 @@ log = logging.getLogger(__name__)
 _session_threads: dict[str, str] = {}
 _session_models: dict[str, str] = {}
 
+# Shared Notion thread pool (NOTIONCHAT_THREAD_REUSE_LIMIT > 0).
+# Keyed by resolved model so model switches force a fresh window.
+_reuse_pool: dict[str, dict[str, Any]] = {}
+
 
 class FunctionDetails(BaseModel):
     name: str
@@ -137,6 +141,86 @@ def _remember_thread(req: ChatCompletionRequest, thread_id: str, settings: Setti
     if req.user:
         _session_threads[req.user] = thread_id
         _session_models[req.user] = _resolved_request_model(req, settings)
+
+
+def _take_pooled_thread(req: ChatCompletionRequest, settings: Settings) -> str | None:
+    """Reuse a shared Notion thread for up to thread_reuse_limit completions."""
+    limit = settings.thread_reuse_limit
+    if limit <= 0:
+        return None
+    model = _resolved_request_model(req, settings)
+    slot = _reuse_pool.get(model)
+    if not slot:
+        return None
+    thread_id = slot.get("thread_id")
+    uses = int(slot.get("uses") or 0)
+    if not isinstance(thread_id, str) or not thread_id:
+        return None
+    if uses >= limit:
+        log.info(
+            "Thread reuse limit reached (%d/%d) for model %r — opening new Notion chat",
+            uses,
+            limit,
+            model,
+        )
+        _reuse_pool.pop(model, None)
+        return None
+    log.info(
+        "Reusing Notion thread %s (%d/%d) model=%r",
+        thread_id[:8],
+        uses + 1,
+        limit,
+        model,
+    )
+    return thread_id
+
+
+def _record_pooled_thread(req: ChatCompletionRequest, thread_id: str, settings: Settings) -> None:
+    limit = settings.thread_reuse_limit
+    if limit <= 0 or not thread_id:
+        return
+    model = _resolved_request_model(req, settings)
+    slot = _reuse_pool.get(model)
+    if slot and slot.get("thread_id") == thread_id:
+        slot["uses"] = int(slot.get("uses") or 0) + 1
+    else:
+        _reuse_pool[model] = {"thread_id": thread_id, "uses": 1}
+        log.info(
+            "Started reusable Notion thread %s (1/%d) model=%r",
+            thread_id[:8],
+            limit,
+            model,
+        )
+
+
+def _resolve_request_thread(
+    req: ChatCompletionRequest,
+    settings: Settings,
+    *,
+    ide_agent: bool,
+    tools_active: bool,
+) -> str | None:
+    # Prefer explicit OpenAI `user` session continuity for normal chat.
+    if not ide_agent and not tools_active:
+        thread_id = _resolve_thread_id(req, settings)
+        if thread_id:
+            return thread_id
+    return _take_pooled_thread(req, settings)
+
+
+def _remember_request_thread(
+    req: ChatCompletionRequest,
+    thread_id: str,
+    settings: Settings,
+    *,
+    ide_agent: bool,
+    tools_active: bool,
+) -> None:
+    if not ide_agent and not tools_active:
+        _remember_thread(req, thread_id, settings)
+    # Shared pool is only for requests without an OpenAI `user` session key.
+    if not req.user:
+        _record_pooled_thread(req, thread_id, settings)
 
 
 async def _ensure_model_aliases(client: NotionAIClient, settings: Settings) -> None:
@@ -354,8 +438,13 @@ async def _stream_openai(
                     ide_agent=ide_agent,
                     tools_active=tools_active,
                 )
-            if not ide_agent and not tools_active:
-                _remember_thread(req, result.thread_id, settings)
+            _remember_request_thread(
+                req,
+                result.thread_id,
+                settings,
+                ide_agent=ide_agent,
+                tools_active=tools_active,
+            )
 
             if result.tool_calls:
                 yield _chunk(
@@ -438,8 +527,13 @@ async def _stream_openai(
                     delta={"content": piece},
                 )
             result = finalize()
-            if not ide_agent and not tools_active:
-                _remember_thread(req, result.thread_id, settings)
+            _remember_request_thread(
+                req,
+                result.thread_id,
+                settings,
+                ide_agent=ide_agent,
+                tools_active=tools_active,
+            )
 
             # Final authoritative snapshot if live stream drifted from cleaned result.
             final_text = (result.text or "").strip()
@@ -648,7 +742,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     sorted(client_tool_names(tools))[:8],
                     len(req.messages),
                 )
-                thread_id = None if (ide_agent or tools_active) else _resolve_thread_id(req, settings)
+                thread_id = _resolve_request_thread(
+                    req,
+                    settings,
+                    ide_agent=ide_agent,
+                    tools_active=tools_active,
+                )
                 if req.stream:
                     return StreamingResponse(
                         _stream_openai(
@@ -689,8 +788,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     len(result.text or ""),
                     [((tc.get("function") or {}).get("name")) for tc in (result.tool_calls or [])],
                 )
-                if not ide_agent and not tools_active:
-                    _remember_thread(req, result.thread_id, settings)
+                _remember_request_thread(
+                    req,
+                    result.thread_id,
+                    settings,
+                    ide_agent=ide_agent,
+                    tools_active=tools_active,
+                )
                 completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
                 finish_reason = "tool_calls" if result.tool_calls else "stop"
                 return {

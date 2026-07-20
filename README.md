@@ -16,6 +16,7 @@ Cookie auth · streaming · Cursor / 9router / Postman
 If this saves you time, a coffee (or satoshi) helps keep it maintained.
 
 [![PayPal](https://img.shields.io/badge/PayPal-Donate-00457C?style=for-the-badge&logo=paypal&logoColor=white)](https://paypal.me/captainredz?locale.x=en_US&country.x=ID)
+[![Patreon](https://img.shields.io/badge/Patreon-Support-FF424D?style=for-the-badge&logo=patreon&logoColor=white)](https://patreon.com/mughu?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink)
 [![Traktir Kopi](https://img.shields.io/badge/Traktir%20Kopi-MuGhu-F59E0B?style=for-the-badge)](https://traktir.mughu.id/)
 
 | | Network | Address |
@@ -53,6 +54,7 @@ Works with [Cursor](https://cursor.com), [9router](https://github.com), Postman,
 - **Browser cookie authentication** — no separate Notion API key required
 - **Model aliases** — e.g. `opus-4.8`, `gpt-4o`, `sonnet-4.6` mapped to Notion internal model IDs
 - **Thread state** for normal chat sessions (optional `user` field for continuity)
+- **Thread reuse pool** — optional `NOTIONCHAT_THREAD_REUSE_LIMIT` to recycle one Notion chat window for N turns (default off)
 - **Tools bridge (experimental)** — prompt-based translation between OpenAI-style tool calls and Notion AI output, aimed at Cursor Agent mode
 - **Postman collection** in [`postman/`](postman/)
 
@@ -120,6 +122,7 @@ Edit `.env`:
 | `NOTION_COOKIE` | Optional — full `document.cookie` for auto-bootstrap on startup |
 | `NOTION_PROXY` | Optional — HTTP/SOCKS proxy for Notion egress (needed when a home-PC cookie is used on a VPS) |
 | `NOTION_USER_AGENT` / `NOTION_CLIENT_VERSION` | Optional — match the browser that created the cookie |
+| `NOTIONCHAT_THREAD_REUSE_LIMIT` | Optional — reuse one Notion chat for N completions before rotating (`0` = off, default). Helps reduce thread spam / ban risk |
 
 ### 3. Bootstrap account from browser cookie
 

@@ -133,8 +133,17 @@ class NotionAIClient:
         reuse_thread_id = thread_id
         prior: ThreadState | None = None
         if thread_id:
-            prior = load_thread_state(thread_id, self.thread_state_dir)
-            if prior.notion_model != notion_model:
+            try:
+                prior = load_thread_state(thread_id, self.thread_state_dir)
+            except NotionChatError as e:
+                log.warning(
+                    "Cannot reuse thread %s (%s) — starting a new Notion chat",
+                    thread_id[:8],
+                    e,
+                )
+                reuse_thread_id = None
+                prior = None
+            if prior is not None and prior.notion_model != notion_model:
                 log.info(
                     "Model changed on thread %s (%r -> %r) — starting new Notion thread",
                     thread_id,
@@ -142,6 +151,7 @@ class NotionAIClient:
                     notion_model,
                 )
                 reuse_thread_id = None
+                prior = None
 
         if reuse_thread_id and prior:
             updated_ids = [*prior.updated_config_ids, new_uuid()]
