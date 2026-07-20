@@ -33,7 +33,9 @@ def build_config_value(
 ) -> dict[str, Any]:
     cfg: dict[str, Any] = {
         "type": "workflow",
-        "modelFromUser": not is_subsequent_turn,
+        # Always true: OpenAI clients send an explicit model every turn.
+        # False on subsequent turns made Notion fall back to Auto when reusing threads.
+        "modelFromUser": True,
         "enableAgentAutomations": False,
         "enableAgentIntegrations": False,
         "enableCustomAgents": False,
