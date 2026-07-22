@@ -96,6 +96,150 @@ class ChatCompletionRequest(BaseModel):
     parallel_tool_calls: bool | None = True
 
 
+# --- OpenAI Responses API (POST /v1/responses) ---
+# Issue #4: Claude Code (via 9router) hits /v1/responses and gets 404.
+# We accept the Responses API shape, delegate to the existing
+# chat_completions pipeline, then re-shape the response so clients that
+# expect the newer API (Codex, Claude Code, etc.) get a valid payload.
+
+
+class ResponsesInputMessage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    role: str
+    content: str | list[Any] | None = None
+
+
+class ResponsesRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    model: str
+    # Either a flat string or a list of {role, content} items, like the
+    # OpenAI Responses API allows.
+    input: str | list[ResponsesInputMessage] | list[dict[str, Any]] | None = None
+    # Some clients (older Codex builds, etc.) send `messages` instead of `input`.
+    messages: list[ChatMessage] | None = None
+    instructions: str | None = None
+    stream: bool = False
+    tools: list[ToolDefinition] | None = None
+    tool_choice: Any | None = None
+
+
+def _responses_to_chat(req: "ResponsesRequest") -> "ChatCompletionRequest":
+    """Translate a Responses API request into a ChatCompletionRequest."""
+    chat_messages: list[ChatMessage] = []
+
+    if req.instructions:
+        chat_messages.append(ChatMessage(role="system", content=req.instructions))
+
+    raw_input = req.input
+    if isinstance(raw_input, str):
+        if raw_input:
+            chat_messages.append(ChatMessage(role="user", content=raw_input))
+    elif isinstance(raw_input, list):
+        for item in raw_input:
+            if isinstance(item, ResponsesInputMessage):
+                role = item.role or "user"
+                content = item.content
+            elif isinstance(item, dict):
+                role = item.get("role") or "user"
+                content = item.get("content")
+            else:
+                continue
+            chat_messages.append(ChatMessage(role=role, content=content))
+
+    # Fallback: some clients send `messages` instead of `input`.
+    if len(chat_messages) <= (1 if req.instructions else 0) and req.messages:
+        chat_messages.extend(req.messages)
+
+    return ChatCompletionRequest(
+        model=req.model,
+        messages=chat_messages,
+        stream=False,  # streaming responses conversion is out of scope for v1
+        tools=req.tools,
+        tool_choice=req.tool_choice,
+    )
+
+
+def _chat_to_responses(chat_resp: dict[str, Any], model: str) -> dict[str, Any]:
+    """Re-shape a Chat Completions response into the Responses API shape."""
+    choices = chat_resp.get("choices") or []
+    output: list[dict[str, Any]] = []
+    finish_reason = "stop"
+    if choices:
+        first = choices[0]
+        finish_reason = first.get("finish_reason") or "stop"
+        message = first.get("message") or {}
+        text = message.get("content")
+        if text:
+            output.append(
+                {
+                    "type": "message",
+                    "id": f"msg_{uuid.uuid4().hex[:24]}",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": text,
+                            "annotations": [],
+                        }
+                    ],
+                }
+            )
+        for tc in message.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            call_id = tc.get("id") or f"call_{uuid.uuid4().hex[:24]}"
+            output.append(
+                {
+                    "type": "function_call",
+                    "id": call_id,
+                    "call_id": call_id,
+                    "name": fn.get("name", ""),
+                    "arguments": fn.get("arguments", "{}"),
+                    "status": "completed",
+                }
+            )
+
+    if not output:
+        # Ensure clients always get at least one output item so they don't
+        # treat an empty assistant turn as a transport error.
+        output.append(
+            {
+                "type": "message",
+                "id": f"msg_{uuid.uuid4().hex[:24]}",
+                "role": "assistant",
+                "status": "completed",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": "",
+                        "annotations": [],
+                    }
+                ],
+            }
+        )
+
+    usage = chat_resp.get("usage") or {}
+    resp_id = chat_resp.get("id") or f"resp_{uuid.uuid4().hex[:24]}"
+    if resp_id.startswith("chatcmpl-"):
+        resp_id = "resp_" + resp_id[len("chatcmpl-") :]
+
+    return {
+        "id": resp_id,
+        "object": "response",
+        "created_at": chat_resp.get("created") or int(time.time()),
+        "status": "completed" if finish_reason != "tool_calls" else "requires_action",
+        "model": model,
+        "output": output,
+        "usage": {
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "output_tokens": usage.get("completion_tokens", 0),
+            "total_tokens": usage.get("total_tokens", 0),
+        },
+    }
+
+
 def _tools_payload(req: ChatCompletionRequest) -> list[dict[str, Any]]:
     if not req.tools:
         return []
@@ -710,6 +854,97 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             await client.aclose()
 
+    async def _run_chat_completion(
+        req: ChatCompletionRequest,
+        x_content_generation: str | None,
+    ) -> dict[str, Any]:
+        """Core non-streaming chat completion logic.
+
+        Shared by /v1/chat/completions (non-streaming path) and
+        /v1/responses. Streaming and HTTP error translation stay in the
+        route handlers.
+        """
+        tools = normalize_tools(_tools_payload(req))
+        content_mode = bool(x_content_generation)
+        system, prompt, tools_active, ide_agent, tools = prepare_chat_input(
+            req.messages,
+            tools=tools,
+            tool_choice=req.tool_choice,
+            content_mode=content_mode,
+        )
+        if not tools and is_ide_agent_messages(req.messages):
+            log.warning("Cursor-like request but tools[] empty after prepare_chat_input")
+        client = get_client()
+        try:
+            # Prefetch aliases before resolve/log so names like glm-5.2 map cleanly.
+            await _ensure_model_aliases(client, settings)
+            log.info(
+                "chat stream=%s model=%s resolved=%s tools=%d tools_active=%s ide_agent=%s tool_names=%s msgs=%d",
+                req.stream,
+                normalize_request_model(req.model) or req.model,
+                _resolved_request_model(req, settings),
+                len(tools),
+                tools_active,
+                ide_agent,
+                sorted(client_tool_names(tools))[:8],
+                len(req.messages),
+            )
+            thread_id = _resolve_request_thread(
+                req,
+                settings,
+                ide_agent=ide_agent,
+                tools_active=tools_active,
+            )
+            result = await client.complete(
+                prompt=prompt,
+                system=system,
+                model=req.model,
+                thread_id=thread_id,
+                tools_active=tools_active,
+                ide_agent_mode=ide_agent,
+                client_tools=tools,
+            )
+            result = await _bridge_ide_agent_async(
+                client,
+                result,
+                req=req,
+                tools=tools,
+                prompt=prompt,
+                system=system,
+                ide_agent=ide_agent,
+                tools_active=tools_active,
+            )
+            log.info(
+                "chat result text_len=%s tool_calls=%s",
+                len(result.text or ""),
+                [((tc.get("function") or {}).get("name")) for tc in (result.tool_calls or [])],
+            )
+            _remember_request_thread(
+                req,
+                result.thread_id,
+                settings,
+                ide_agent=ide_agent,
+                tools_active=tools_active,
+            )
+            completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+            finish_reason = "tool_calls" if result.tool_calls else "stop"
+            return {
+                "id": completion_id,
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": req.model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": _assistant_message(result),
+                        "finish_reason": finish_reason,
+                    }
+                ],
+                "usage": _usage(result),
+            }
+        finally:
+            await client.aclose()
+
     @app.post("/v1/chat/completions")
     async def chat_completions(
         req: ChatCompletionRequest,
@@ -717,38 +952,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         x_content_generation: str | None = Header(None, alias="X-Content-Generation"),
     ) -> Any:
         try:
-            tools = normalize_tools(_tools_payload(req))
-            content_mode = bool(x_content_generation)
-            system, prompt, tools_active, ide_agent, tools = prepare_chat_input(
-                req.messages,
-                tools=tools,
-                tool_choice=req.tool_choice,
-                content_mode=content_mode,
-            )
-            if not tools and is_ide_agent_messages(req.messages):
-                log.warning("Cursor-like request but tools[] empty after prepare_chat_input")
-            client = get_client()
-            try:
-                # Prefetch aliases before resolve/log so names like glm-5.2 map cleanly.
-                await _ensure_model_aliases(client, settings)
-                log.info(
-                    "chat stream=%s model=%s resolved=%s tools=%d tools_active=%s ide_agent=%s tool_names=%s msgs=%d",
-                    req.stream,
-                    normalize_request_model(req.model) or req.model,
-                    _resolved_request_model(req, settings),
-                    len(tools),
-                    tools_active,
-                    ide_agent,
-                    sorted(client_tool_names(tools))[:8],
-                    len(req.messages),
+            if req.stream:
+                # Streaming path stays in-line because it returns SSE chunks,
+                # not a serializable dict.
+                tools = normalize_tools(_tools_payload(req))
+                content_mode = bool(x_content_generation)
+                system, prompt, tools_active, ide_agent, tools = prepare_chat_input(
+                    req.messages,
+                    tools=tools,
+                    tool_choice=req.tool_choice,
+                    content_mode=content_mode,
                 )
-                thread_id = _resolve_request_thread(
-                    req,
-                    settings,
-                    ide_agent=ide_agent,
-                    tools_active=tools_active,
-                )
-                if req.stream:
+                client = get_client()
+                try:
+                    await _ensure_model_aliases(client, settings)
+                    thread_id = _resolve_request_thread(
+                        req,
+                        settings,
+                        ide_agent=ide_agent,
+                        tools_active=tools_active,
+                    )
                     return StreamingResponse(
                         _stream_openai(
                             client,
@@ -764,58 +987,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         ),
                         media_type="text/event-stream",
                     )
-                result = await client.complete(
-                    prompt=prompt,
-                    system=system,
-                    model=req.model,
-                    thread_id=thread_id,
-                    tools_active=tools_active,
-                    ide_agent_mode=ide_agent,
-                    client_tools=tools,
-                )
-                result = await _bridge_ide_agent_async(
-                    client,
-                    result,
-                    req=req,
-                    tools=tools,
-                    prompt=prompt,
-                    system=system,
-                    ide_agent=ide_agent,
-                    tools_active=tools_active,
-                )
-                log.info(
-                    "chat result text_len=%s tool_calls=%s",
-                    len(result.text or ""),
-                    [((tc.get("function") or {}).get("name")) for tc in (result.tool_calls or [])],
-                )
-                _remember_request_thread(
-                    req,
-                    result.thread_id,
-                    settings,
-                    ide_agent=ide_agent,
-                    tools_active=tools_active,
-                )
-                completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
-                finish_reason = "tool_calls" if result.tool_calls else "stop"
-                return {
-                    "id": completion_id,
-                    "object": "chat.completion",
-                    "created": int(time.time()),
-                    "model": req.model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "message": _assistant_message(result),
-                            "finish_reason": finish_reason,
-                        }
-                    ],
-                    "usage": _usage(result),
-                }
-            finally:
-                await client.aclose()
+                finally:
+                    pass  # client kept alive by _stream_openai
+            return await _run_chat_completion(req, x_content_generation)
         except NotionChatError as e:
             if e.status_code == 403:
                 log.warning("chat/completions 403: %s", e)
+            raise HTTPException(status_code=e.status_code, detail=str(e)) from e
+
+    @app.post("/v1/responses")
+    async def responses_endpoint(
+        req: ResponsesRequest,
+        _: None = Depends(verify_key),
+        x_content_generation: str | None = Header(None, alias="X-Content-Generation"),
+    ) -> Any:
+        """OpenAI Responses API compatibility shim (issue #4).
+
+        Claude Code / Codex / newer OpenAI SDKs send chat requests to
+        /v1/responses with a slightly different shape than
+        /v1/chat/completions. We translate into Chat Completions, run the
+        same Notion pipeline, then re-shape the response back.
+
+        Non-streaming only in v1 -- streaming Responses SSE differs enough
+        (response.output_text.delta events, etc.) that it deserves its own
+        follow-up rather than a half-baked translation.
+        """
+        if req.stream:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Streaming is not yet supported on /v1/responses. "
+                    "Disable stream=true or use /v1/chat/completions."
+                ),
+            )
+        try:
+            chat_req = _responses_to_chat(req)
+            chat_resp = await _run_chat_completion(chat_req, x_content_generation)
+            return _chat_to_responses(chat_resp, chat_req.model)
+        except NotionChatError as e:
+            if e.status_code == 403:
+                log.warning("responses 403: %s", e)
             raise HTTPException(status_code=e.status_code, detail=str(e)) from e
 
     return app
