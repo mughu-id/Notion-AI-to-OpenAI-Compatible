@@ -28,6 +28,7 @@ from notionchat.models import (
 from notionchat.tools import (
     bridge_ide_agent_response,
     build_tool_denial_retry_append,
+    build_tool_retry_append,
     client_tool_names,
     is_ide_agent_messages,
     looks_like_coding_task_prompt,
@@ -488,16 +489,32 @@ async def _bridge_ide_agent_async(
         ide_agent=ide_agent,
         tools_active=tools_active,
     )
-    if bridged.tool_calls or not ide_agent or not tools_active:
+    if bridged.tool_calls or not tools_active:
         return bridged
 
-    should_retry = looks_like_tool_denial(result.text) or looks_like_coding_task_prompt(prompt)
+    # Matching the refusal's wording was a losing game: each retry came back
+    # with a new sentence ("isn't available" → "was not found in the available
+    # filesystem" → "don't have a connected tool"). A turn that carried tools
+    # and produced no call is the condition worth retrying, whatever it said.
+    should_retry = (
+        looks_like_tool_denial(result.text)
+        or (ide_agent and looks_like_coding_task_prompt(prompt))
+        or bool(tools)
+    )
     if not should_retry:
         return bridged
 
-    log.info("IDE bridge retry: no tool_calls after compile (denial=%s)", looks_like_tool_denial(result.text))
+    log.info(
+        "tool retry: no tool_calls after compile (ide=%s denial=%s chars=%s)",
+        ide_agent,
+        looks_like_tool_denial(result.text),
+        len(result.text or ""),
+    )
     retry_system = (system or "").strip()
-    append = build_tool_denial_retry_append()
+    # The IDE retry text is a scaffolding recipe (npm create vite, Write,
+    # Shell); fed to a turn about a text file it invents a React project
+    # in the reply. One correction phrase serves both paths.
+    append = build_tool_retry_append()
     retry_system = f"{retry_system}\n\n{append}".strip() if retry_system else append
     retry = await client.complete(
         prompt=prompt,

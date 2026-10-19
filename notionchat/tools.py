@@ -79,6 +79,23 @@ _DENIAL_PHRASES = (
     "can't directly create or edit",
     "cannot directly create or edit",
     "don't have access to cursor",
+    "don't have a connected",
+    "do not have a connected",
+    "don't have a tool",
+    "do not have a tool",
+    "no connected",
+    "i don't have a connected",
+    "not connected to",
+    "don't have access to a",
+    "isn't available in this session",
+    "is not available in this session",
+    "not available in this session",
+    "isn't available here",
+    "is not available here",
+    "tools are not available",
+    "tool is not available",
+    "isn't available to me",
+    "is not available to me",
     "do not have access to cursor",
     "copy-pasteable",
     "paste either",
@@ -1047,6 +1064,37 @@ def build_ide_tools_instruction(
     )
 
 
+_PLANNER_ROLE = (
+    "You plan for a coding agent. Its runtime executes every action and reports the "
+    "outcome back to you; execution is not your part of the job, and whether you "
+    "could do it alone is not worth a sentence in the reply. Work from what the "
+    "runtime has actually returned: do not search a workspace for the answer, and do "
+    "not describe an action as done before its result arrives. Answer the protocol in "
+    "the user message. Do not search the workspace, and do not say what you can or "
+    "cannot reach."
+)
+
+
+def build_tool_retry_append() -> str:
+    """Correction for a plain (non-IDE) tool turn that came back as prose.
+
+    The upstream prompt keeps the model talking like a chat assistant, so a
+    turn with tools often comes back as "the tool isn't available" instead of
+    a call. Naming the situation and the exact shape is what turns it around;
+    asking more politely does not.
+    """
+    return (
+        "The previous reply did not call a tool, but this request supplied real tools "
+        "that run on the caller's machine — not inside Notion, and not unavailable.\n"
+        "Do not say a tool is missing, unavailable, or that you cannot access files. "
+        "If the user's request needs one of the tools above, call it now.\n"
+        "Reply with ONLY this JSON, no markdown fences, no commentary:\n"
+        '{"content": null, "tool_calls": [{"id": "call_1", "type": "function", '
+        '"function": {"name": "<tool name>", "arguments": "<JSON string>"}}]}\n'
+        'When no tool is needed, reply with plain text.'
+    )
+
+
 def build_tool_denial_retry_append() -> str:
     return (
         "Use `npm create vite@latest .` in the current folder (not a new subfolder). "
@@ -1307,9 +1355,20 @@ def prepare_chat_input(
     else:
         system_parts.insert(0, _DEFAULT_ASSISTANT_SYSTEM)
 
+    # The tool block goes at the END OF THE PROMPT, not into the system text.
+    # Notion leans much harder on its own system prompt than on the user turn,
+    # so a tool spec appended to `system` gets read as "context I may ignore";
+    # the same words inside the user turn are what actually produces a call.
+    # (This is the shape the working Magpie plugin uses.)
+    tool_block = ""
     if tools_active:
-        system_parts.append(
-            build_tools_system_append(
+        # Framing first, then the catalog: written to as the planner for an
+        # operator that executes, the model emits the call; written to as a chat
+        # assistant, it explains why it cannot reach the file.
+        tool_block = (
+            _PLANNER_ROLE
+            + "\n\n"
+            + build_tools_system_append(
                 normalized_tools,
                 tool_choice=tool_choice,
                 ide_agent=ide_agent,
@@ -1317,7 +1376,10 @@ def prepare_chat_input(
         )
 
     system = "\n\n".join(system_parts) if system_parts else None
-    prompt = "\n\n".join(transcript_blocks)
+    prompt_parts = list(transcript_blocks)
+    if tool_block:
+        prompt_parts.append(tool_block)
+    prompt = "\n\n".join(prompt_parts)
     return system, prompt, tools_active, ide_agent, normalized_tools
 
 
