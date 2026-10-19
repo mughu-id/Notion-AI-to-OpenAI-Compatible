@@ -18,6 +18,13 @@ def cmd_serve(_: argparse.Namespace) -> int:
     home = os.getenv("NOTIONCHAT_HOME", "").strip()
     if home:
         os.chdir(Path(home).expanduser().resolve())
+    # Without this the module loggers stay at WARNING and every INFO line —
+    # including which upstream model a request really went to — is dropped.
+    import logging
+    logging.basicConfig(
+        level=os.getenv("NOTIONCHAT_LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     settings = load_settings()
     app = create_app(settings)
     uvicorn.run(app, host=settings.host, port=settings.port, log_level="info")
